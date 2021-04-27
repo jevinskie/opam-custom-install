@@ -10,6 +10,7 @@
 
 open Cmdliner
 open OpamTypes
+open OpamStateTypes
 open OpamPackage.Set.Op
 
 let custom_install_doc =
@@ -99,6 +100,7 @@ let custom_install cli =
         (fun nv -> OpamPackage.Map.add nv (mk_opam nv))
         nvs OpamPackage.Map.empty
     in
+    let std_opams = st.opams in
     let st =
       {st with
        opams = OpamPackage.Map.union (fun _ o -> o) st.opams opams;
@@ -137,7 +139,26 @@ let custom_install cli =
                 solution
             else solution
           in
-          OpamSolution.apply st ~requested ~assume_built:true solution
+          let st, res =
+            OpamSolution.apply st ~requested ~assume_built:true solution
+          in
+          (* reset the installed 'opam' files to their repository versions *)
+          let st =
+            match res with
+            | OK acts | Partial_error { actions_successes = acts; _ } ->
+              List.fold_left (fun st -> function
+                  | `Install nv when OpamPackage.Set.mem nv nvs ->
+                    let opam = OpamPackage.Map.find nv std_opams in
+                    let opams = OpamPackage.Map.add nv opam st.opams in
+                    let st = { st with opams } in
+                    if not OpamStateConfig.(!r.dryrun) then
+                      OpamSwitchAction.install_metadata st nv;
+                    st
+                  | _ -> st)
+                st acts
+            | _ -> st
+          in
+          st, res
       in
       OpamSolution.check_solution st (Success res);
       st
