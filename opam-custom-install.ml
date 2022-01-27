@@ -45,7 +45,7 @@ let custom_install cli =
             dependent packages.")
   in
   let packages =
-    Arg.(non_empty & pos 0 (list OpamArg.package) [] &
+    Arg.(required & pos 0 (some OpamArg.package) None &
          info [] ~docv:"PACKAGE[.VERSION]" ~doc:
            "Package which should be registered as installed with the files \
             installed by $(i,COMMAND).")
@@ -56,11 +56,11 @@ let custom_install cli =
            "Command to run in the current directory that is expected to \
             install the files for $(i,PACKAGE) to the current opam switch \
             prefix. Variable expansions like $(b,%{prefix}%), $(b,%{name}%), \
-            $(b,%{version}%) and $(b,%{package}) are expanded as per the \
+            $(b,%{version}%) and $(b,%{package}%) are expanded as per the \
             $(i,install:) package definition field.")
   in
   let custom_install
-      global_options build_options no_recompilations packages cmd () =
+      global_options build_options no_recompilations (name, version) cmd () =
     OpamArg.apply_global_options cli global_options;
     OpamArg.apply_build_options cli build_options;
     OpamClientConfig.update
@@ -69,47 +69,72 @@ let custom_install cli =
       ();
     OpamGlobalState.with_ `Lock_none @@ fun gt ->
     OpamSwitchState.with_ `Lock_write gt @@ fun st ->
-    let get_nv package = match package with
-      | name, Some v -> OpamPackage.create name v
-      | name, None ->
-        try OpamSwitchState.get_package st name
-        with Not_found ->
-          OpamPackage.create name (OpamPackage.Version.of_string "~dev")
-    in
-    let nvs =
-      List.fold_left (fun acc p -> OpamPackage.Set.add (get_nv p) acc)
-        OpamPackage.Set.empty packages
-    in
     let build_dir = OpamFilename.cwd () in
-    let mk_opam nv =
-      OpamFile.OPAM.create nv
+    let url =
+      OpamUrl.parse ~backend:`rsync (OpamFilename.Dir.to_string build_dir)
+    in
+    let st =
+      OpamPinCommand.source_pin st name ?version
+        ~edit:false ~quiet:true ~force:true ~ignore_extra_pins:true
+        (Some url)
+    in
+    let nv = OpamPinned.package st name in
+    let pin_opam_file = OpamSwitchState.opam st nv in
+    let depends = OpamFile.OPAM.depends pin_opam_file in
+    let patched_depends =
+      (* let deps_formula =
+       *   OpamPackageVar.all_depends
+       *     ~build:true ~post:true ~test:true ~doc:true ~dev:true ~depopts:false
+       *     st pin_opam_file
+       * in *)
+      OpamFormula.map (fun (name, cstr) ->
+          let f ~post ~default =
+            OpamPackageVar.filter_depends_formula ~post ~default
+              ~build:true ~test:true ~doc:true ~dev:true
+              ~env:(OpamPackageVar.resolve_switch ~package:nv st)
+              (Atom (name, cstr))
+            |> OpamFormula.to_atom_formula
+          in
+          if OpamPackage.Set.exists (fun nv ->
+              OpamFormula.eval (fun at -> OpamFormula.check at nv)
+                (f ~post:true ~default:false))
+              st.installed
+          then Atom (name, cstr)
+          else if f ~post:false ~default:true = OpamFormula.Empty
+          then Atom (name, cstr) (* keep post-dependencies *)
+          else if OpamPackage.has_name st.installed name then
+            (OpamConsole.warning
+               "Ignored non-matching version constraint for %s"
+               (OpamPackage.Name.to_string name);
+             Atom (name, Empty))
+          else
+            (OpamConsole.warning
+               "Ignored non-installed dependency on %s"
+               (OpamPackage.Name.to_string name);
+             Empty))
+        depends
+    in
+    let pin_opam_file =
+      pin_opam_file
+      |> OpamFile.OPAM.with_depends patched_depends
+      (* |> OpamFile.OPAM.with_url (\* needed for inplace_build correct build dir *\)
+       *   (OpamFile.URL.create url) *)
+    in
+    OpamFile.OPAM.write_with_preserved_format
+      (OpamPath.Switch.Overlay.opam st.switch_global.root st.switch name)
+      pin_opam_file;
+    let patched_opam_file =
+      pin_opam_file
+      (* |> OpamFile.OPAM.with_build [] *)
       |> OpamFile.OPAM.with_install
         [List.map (fun a -> CString a, None) cmd, None]
-      |> OpamFile.OPAM.with_synopsis
-        ("Package installed using 'opam custom-install' from "^
-         OpamFilename.Dir.to_string build_dir)
-      |> OpamFile.OPAM.with_url (* needed for inplace_build correct build dir *)
-        (OpamFile.URL.create
-           (OpamUrl.parse ~backend:`rsync
-              (OpamFilename.Dir.to_string build_dir)))
+        (* XXX what happens in case there is a .install file ? *)
     in
-    let opams =
-      OpamPackage.Set.fold
-        (fun nv -> OpamPackage.Map.add nv (mk_opam nv))
-        nvs OpamPackage.Map.empty
-    in
+    let st = OpamSwitchState.update_package_metadata nv patched_opam_file st in
     let st =
-      {st with
-       opams = OpamPackage.Map.union (fun _ o -> o) st.opams opams;
-       packages = OpamPackage.Set.union st.packages nvs;
-       available_packages =
-         lazy (OpamPackage.Set.union (Lazy.force st.available_packages) nvs);
-      }
-    in
-    let st =
-      let atoms = OpamSolution.eq_atoms_of_packages nvs in
+      let atoms = [name, Some (`Eq, nv.version)] in
       let request = OpamSolver.request ~install:atoms ~criteria:`Fixup () in
-      let requested = OpamPackage.names_of_packages nvs in
+      let requested = OpamPackage.Name.Set.singleton name in
       let solution =
         OpamSolution.resolve st Reinstall
           ~reinstall:(OpamPackage.packages_of_names st.installed requested)
@@ -118,7 +143,7 @@ let custom_install cli =
       in
       let st, res = match solution with
         | Conflicts cs ->
-          (* this shouldn't happen, the package requested has no requirements *)
+          (* this shouldn't happen, we checked the requirements already *)
           OpamConsole.error "Package conflict!";
           OpamConsole.errmsg "%s"
             (OpamCudf.string_of_conflicts st.packages
