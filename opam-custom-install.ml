@@ -14,6 +14,168 @@ open OpamTypes
 let custom_install_doc =
   "Install a package using a custom command."
 
+let get_source_definition ?version ?subpath st nv url =
+  let root = st.switch_global.root in
+  let srcdir = OpamFilename.cwd () in
+  let subsrcdir =
+    match OpamFile.URL.subpath url with
+    | None -> srcdir
+    | Some subpath -> OpamFilename.Op.(srcdir / subpath)
+  in
+  let open OpamStd.Option.Op in
+  OpamPinned.find_opam_file_in_source nv.name subsrcdir >>= fun f ->
+  OpamPinCommand.read_opam_file_for_pinning ~quiet:true
+    nv.name f (OpamFile.URL.url url)
+  >>| fun opam ->
+  OpamFile.OPAM.with_url url @@
+  (match version with
+   | Some v -> OpamFile.OPAM.with_version v
+   | None -> fun o -> o) @@
+  opam
+
+
+let source_pin st name ?version ?subpath target_url =
+  log "pin %a to %a %a%a"
+    (slog OpamPackage.Name.to_string) name
+    (slog (OpamStd.Option.to_string OpamPackage.Version.to_string)) version
+    (slog (OpamStd.Option.to_string ~none:"none" OpamUrl.to_string)) target_url;
+
+  let open OpamStd.Option.Op in
+
+  let cur_version, cur_urlf =
+    try
+      let cur_version = OpamPinned.version st name in
+      let nv = OpamPackage.create name cur_version in
+      let cur_opam = OpamSwitchState.opam st nv in
+      let cur_urlf = OpamFile.OPAM.url cur_opam in
+    with Not_found ->
+      let version = default_version st name in
+      version, None
+  in
+
+  let pin_version = version +! cur_version in
+
+  let nv = OpamPackage.create name pin_version in
+
+  let urlf = target_url >>| OpamFile.URL.create ?subpath in
+
+  let opam_opt =
+    try
+      urlf >>= fun url ->
+      OpamProcess.Job.run @@ get_source_definition ?version ?subpath ?locked st nv url
+    with Fetch_Fail err ->
+      if force then None else
+        (OpamConsole.error_and_exit `Sync_error
+           "Error getting source from %s:\n%s"
+           (OpamStd.Option.to_string OpamUrl.to_string target_url)
+           (OpamStd.Format.itemize (fun x -> x) [err]));
+  in
+  let opam_opt = opam_opt >>| OpamFormatUpgrade.opam_file in
+
+  let nv =
+    match version with
+    | Some _ -> nv
+    | None ->
+      OpamPackage.create name
+        ((opam_opt >>= OpamFile.OPAM.version_opt)
+         +! cur_version)
+  in
+
+  let opam_opt =
+    opam_opt >>+ fun () ->
+    OpamPackage.Map.find_opt nv st.installed_opams >>+ fun () ->
+    OpamSwitchState.opam_opt st nv
+  in
+
+  let opam_opt =
+    match opam_local, opam_opt with
+    | Some local, None ->
+      OpamConsole.warning
+        "Couldn't retrieve opam file from versioned source, \
+         using the one found locally.";
+      Some local
+    | Some local, Some vers when
+        not OpamFile.(OPAM.effectively_equal
+                        (OPAM.with_url URL.empty local)
+                        (OPAM.with_url URL.empty vers)) ->
+      OpamConsole.warning
+        "%s's opam file has uncommitted changes, using the versioned one"
+        (OpamPackage.Name.to_string name);
+      opam_opt
+    | _ -> opam_opt
+  in
+
+  if not need_edit && opam_opt = None then
+    OpamConsole.note
+      "No package definition found for %s: please complete the template"
+      (OpamConsole.colorise `bold (OpamPackage.to_string nv));
+
+  let need_edit = need_edit || opam_opt = None in
+
+  let opam_opt =
+    let opam_base = match opam_opt with
+      | None -> OpamFileTools.template nv
+      | Some opam -> opam
+    in
+    let opam_base =
+      OpamFile.OPAM.with_url_opt urlf opam_base
+    in
+    if need_edit then
+      (if not (OpamFile.exists temp_file) then
+         OpamFile.OPAM.write_with_preserved_format
+           ?format_from:(OpamPinned.orig_opam_file st name opam_base)
+           temp_file opam_base;
+       edit_raw name temp_file >>|
+       (* Preserve metadata_dir so that copy_files below works *)
+       OpamFile.OPAM.(with_metadata_dir (metadata_dir opam_base))
+      )
+    else
+      Some opam_base
+  in
+  match opam_opt with
+  | None ->
+    OpamConsole.error_and_exit `Not_found
+      "No valid package definition found"
+  | Some opam ->
+    let opam =
+      match OpamFile.OPAM.get_url opam with
+      | Some _ -> opam
+      | None -> OpamFile.OPAM.with_url_opt urlf opam
+    in
+    let version = version +! (OpamFile.OPAM.version_opt opam +! nv.version) in
+    let nv = OpamPackage.create nv.name version in
+    let st =
+      if ignore_extra_pins then st
+      else handle_pin_depends st nv opam
+    in
+    let opam =
+      opam |>
+      OpamFile.OPAM.with_name name |>
+      OpamFile.OPAM.with_version version
+    in
+    OpamFilename.rmdir
+      (OpamPath.Switch.Overlay.package st.switch_global.root st.switch nv.name);
+
+    let opam = copy_files st opam in
+
+    OpamFile.OPAM.write_with_preserved_format
+      ?format_from:(OpamPinned.orig_opam_file st name opam)
+      (OpamPath.Switch.Overlay.opam st.switch_global.root st.switch nv.name)
+      opam;
+
+    OpamFilename.remove (OpamFile.filename temp_file);
+
+    let st = OpamSwitchState.update_pin nv opam st in
+
+    if not OpamClientConfig.(!r.show) then
+      OpamSwitchAction.write_selections st;
+    OpamConsole.msg "%s is now %s\n"
+      (OpamPackage.Name.to_string name)
+      (string_of_pinned opam);
+
+    st
+
+
 let custom_install cli =
   let doc = custom_install_doc in
   let man = [
@@ -74,9 +236,7 @@ let custom_install cli =
       OpamUrl.parse ~backend:`rsync (OpamFilename.Dir.to_string build_dir)
     in
     let st =
-      OpamPinCommand.source_pin st name ?version
-        ~edit:false ~quiet:true ~force:true ~ignore_extra_pins:true
-        (Some url)
+      OpamPinCommand.source_pin st name ?version url
     in
     let nv = OpamPinned.package st name in
     let pin_opam_file = OpamSwitchState.opam st nv in
@@ -120,9 +280,10 @@ let custom_install cli =
       (* |> OpamFile.OPAM.with_url (\* needed for inplace_build correct build dir *\)
        *   (OpamFile.URL.create url) *)
     in
-    OpamFile.OPAM.write_with_preserved_format
-      (OpamPath.Switch.Overlay.opam st.switch_global.root st.switch name)
-      pin_opam_file;
+    if not OpamStateConfig.(!r.dryrun) then
+      OpamFile.OPAM.write_with_preserved_format
+        (OpamPath.Switch.Overlay.opam st.switch_global.root st.switch name)
+        pin_opam_file;
     let patched_opam_file =
       pin_opam_file
       (* |> OpamFile.OPAM.with_build [] *)
@@ -158,6 +319,20 @@ let custom_install cli =
             else solution
           in
           OpamSolution.apply st ~requested ~assume_built:true solution
+      in
+      let st =
+        match res with
+        | OK acts | Partial_error { actions_successes = acts; _ } ->
+          if List.mem (`Install nv) acts then
+            (* Revert the install instructions to what appears in the overlay
+               (avoids prompt to reinstall on next run) *)
+            let st =
+              OpamSwitchState.update_package_metadata nv pin_opam_file st
+            in
+            if not OpamStateConfig.(!r.dryrun) then
+              OpamSwitchAction.install_metadata st nv;
+            st
+        | _ -> st
       in
       OpamSolution.check_solution st (Success res);
       st
