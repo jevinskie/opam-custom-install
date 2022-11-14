@@ -211,11 +211,12 @@ let custom_install cli =
     let st =
       let atoms = [name, Some (`Eq, nv.version)] in
       let request = OpamSolver.request ~install:atoms ~criteria:`Fixup () in
-      let requested = OpamPackage.Name.Set.singleton name in
+      let names = OpamPackage.Name.Set.singleton name in
+      let requested = OpamPackage.packages_of_names st.installed names in
       let solution =
         OpamSolution.resolve st Reinstall
-          ~reinstall:(OpamPackage.packages_of_names st.installed requested)
-          ~requested:nvs
+          ~reinstall:requested
+          ~requested
           request
       in
       let st, res = match solution with
@@ -230,11 +231,11 @@ let custom_install cli =
           let solution =
             if no_recompilations then
               OpamSolver.filter_solution
-                (fun nv -> OpamPackage.Name.Set.mem nv.name requested)
+                (fun nv -> OpamPackage.Name.Set.mem nv.name names)
                 solution
             else solution
           in
-          OpamSolution.apply st ~requested:nvs ~assume_built:true solution
+          OpamSolution.apply st ~requested ~assume_built:true solution
       in
       let st =
         match res with
