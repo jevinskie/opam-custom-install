@@ -20,10 +20,10 @@ let get_source_definition ?version nv url =
   let subsrcdir =
     match OpamFile.URL.subpath url with
     | None -> srcdir
-    | Some subpath -> OpamFilename.Op.(srcdir / subpath)
+    | Some subpath -> OpamFilename.SubPath.(srcdir / subpath)
   in
   let open OpamStd.Option.Op in
-  OpamPinned.find_opam_file_in_source nv.name subsrcdir >>= fun f ->
+  OpamPinned.find_opam_file_in_source nv.name subsrcdir >>= fun (f, _locked_ext) ->
   OpamPinCommand.read_opam_file_for_pinning ~quiet:true
     nv.name f (OpamFile.URL.url url)
   >>| fun opam ->
