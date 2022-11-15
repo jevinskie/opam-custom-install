@@ -155,6 +155,8 @@ let custom_install cli =
       source_pin st name ?version url
     in
     let nv = OpamFile.OPAM.package pin_opam_file in
+    (* Already have pinned opams in opams *)
+    let repo_opam =(OpamPackage.Map.find nv st.opams) in
     let depends = OpamFile.OPAM.depends pin_opam_file in
     let patched_depends =
       (* let deps_formula =
@@ -196,10 +198,7 @@ let custom_install cli =
       (* |> OpamFile.OPAM.with_url (\* needed for inplace_build correct build dir *\)
        *   (OpamFile.URL.create url) *)
     in
-    if not OpamStateConfig.(!r.dryrun) then
-      OpamFile.OPAM.write_with_preserved_format
-        (OpamPath.Switch.Overlay.opam st.switch_global.root st.switch name)
-        pin_opam_file;
+
     let patched_opam_file =
       pin_opam_file
       (* |> OpamFile.OPAM.with_build [] *)
@@ -254,6 +253,11 @@ let custom_install cli =
       OpamSolution.check_solution st (Success res);
       st
     in
+    (* Store repo file to avoid recompiling the package with upstream changes *)
+    if not OpamStateConfig.(!r.dryrun) then
+      OpamFile.OPAM.write_with_preserved_format
+        OpamFilename.Op.(OpamPath.Switch.installed_opam st.switch_global.root st.switch nv)
+        repo_opam;
     OpamSwitchState.drop st
   in
   OpamArg.mk_command ~cli OpamArg.cli_original "custom-install" ~doc ~man
