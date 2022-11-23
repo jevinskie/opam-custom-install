@@ -85,9 +85,15 @@ let source_pin st name ?version ?subpath target_url =
     OpamFile.OPAM.with_extra_sources [] |>
     OpamFile.OPAM.with_url urlf
   in
+
+  let st = OpamSwitchState.update_pin nv opam st in
+
+  OpamSwitchAction.write_selections st;
+
   OpamConsole.msg "Registering %s as pinned to %s\n"
     (OpamPackage.Name.to_string name)
     (OpamUrl.to_string target_url);
+
   st, opam
 
 
@@ -302,35 +308,35 @@ let () =
  *    *       wish_upgrade=[];
  *    *       extra_attributes=[];
  *    *     } *)
-  
 
-  (* let recompile_cone =
-   *   OpamPackage.Set.of_list @@
-   *   OpamSolver.reverse_dependencies
-   *     ~depopts:true ~installed:true ~unavailable:true
-   *     ~build:true ~post:false
-   *     universe (OpamPackage.Set.singleton nv)
-   * in
-   * 
-   * (\* The API exposes no other way to create an empty solution *\)
-   * let solution = OpamSolver.solution_of_json `Null in
-   * OpamSolver.print_solution
-   *   ~messages:(fun _ -> [])
-   *   ~append:(fun nv -> if OpamSwitchState.Set.mem nv st.pinned then "*" else "")
-   *   ~requested:OpamPackage.Name.Set.empty
-   *   ~reinstall:recompile_cone
-   *   solution;
-   * 
-   * let 
-   *   OpamSwitchState.universe ~reinstall:(OpamPackage.Set.singleton nv) ~requested:nv st
-   * in
-   * let sol =
-   *   OpamSolver.resolve universe ~orphans:OpamPackage.Set.empty
-   *     { criteria=`Fixup;
-   *       wish_install=[];
-   *       wish_remove=[];
-   *       wish_upgrade=[];
-   *       extra_attributes=[];
-   *     }
-   * in *)
+
+(* let recompile_cone =
+ *   OpamPackage.Set.of_list @@
+ *   OpamSolver.reverse_dependencies
+ *     ~depopts:true ~installed:true ~unavailable:true
+ *     ~build:true ~post:false
+ *     universe (OpamPackage.Set.singleton nv)
+ * in
+ * 
+ * (\* The API exposes no other way to create an empty solution *\)
+ * let solution = OpamSolver.solution_of_json `Null in
+ * OpamSolver.print_solution
+ *   ~messages:(fun _ -> [])
+ *   ~append:(fun nv -> if OpamSwitchState.Set.mem nv st.pinned then "*" else "")
+ *   ~requested:OpamPackage.Name.Set.empty
+ *   ~reinstall:recompile_cone
+ *   solution;
+ * 
+ * let 
+ *   OpamSwitchState.universe ~reinstall:(OpamPackage.Set.singleton nv) ~requested:nv st
+ * in
+ * let sol =
+ *   OpamSolver.resolve universe ~orphans:OpamPackage.Set.empty
+ *     { criteria=`Fixup;
+ *       wish_install=[];
+ *       wish_remove=[];
+ *       wish_upgrade=[];
+ *       extra_attributes=[];
+ *     }
+ * in *)
 
