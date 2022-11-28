@@ -8,7 +8,7 @@ Provides the `opam custom-install` command, which allows to wrap a custom instal
 tags: ["org:ocamlpro" "org:opam"]
 license: "LGPL-2.1-only WITH OCaml-LGPL-linking-exception"
 depends: [
-  "dune" {>= "1.5"}
+  "dune" {>= "2.7"}
   "opam-client" {= "master-dev"}
   "opam-state" {= "master-dev"}
   "opam-repository" {= "master-dev"}
