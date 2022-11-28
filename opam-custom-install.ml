@@ -83,16 +83,16 @@ let source_pin st name ?version ?subpath target_url =
     OpamFile.OPAM.with_version version |>
     OpamFile.OPAM.with_extra_files [] |>
     OpamFile.OPAM.with_extra_sources [] |>
-    OpamFile.OPAM.with_url urlf
+    OpamFile.OPAM.with_patches [] |>
+    OpamFile.OPAM.with_url_opt None
   in
 
   let st = OpamSwitchState.update_pin nv opam st in
 
   OpamSwitchAction.write_selections st;
 
-  OpamConsole.msg "Registering %s as pinned to %s\n"
-    (OpamPackage.Name.to_string name)
-    (OpamUrl.to_string target_url);
+  OpamConsole.msg "Registering %s as pinned\n"
+    (OpamPackage.Name.to_string name);
 
   st, opam
 
@@ -157,10 +157,10 @@ let custom_install cli =
     let url =
       OpamUrl.parse ~backend:`rsync (OpamFilename.Dir.to_string build_dir)
     in
-    let st, pin_opam_file =
-      source_pin st name ?version url
-    in
+
+    let st, pin_opam_file = source_pin st name ?version url in
     let nv = OpamFile.OPAM.package pin_opam_file in
+
     let depends = OpamFile.OPAM.depends pin_opam_file in
     let patched_depends =
       (* let deps_formula =
@@ -199,8 +199,6 @@ let custom_install cli =
     let pin_opam_file =
       pin_opam_file
       |> OpamFile.OPAM.with_depends patched_depends
-      (* |> OpamFile.OPAM.with_url (\* needed for inplace_build correct build dir *\)
-       *   (OpamFile.URL.create url) *)
     in
     if not OpamStateConfig.(!r.dryrun) then
       OpamFile.OPAM.write_with_preserved_format
@@ -211,6 +209,8 @@ let custom_install cli =
       (* |> OpamFile.OPAM.with_build [] *)
       |> OpamFile.OPAM.with_install
         [List.map (fun a -> CString a, None) cmd, None]
+      |> OpamFile.OPAM.with_url (* needed for inplace_build correct build dir *)
+        (OpamFile.URL.create url)
         (* XXX what happens in case there is a .install file ? *)
     in
     let st = OpamSwitchState.update_package_metadata nv patched_opam_file st in
@@ -218,10 +218,11 @@ let custom_install cli =
       let atoms = [name, Some (`Eq, nv.version)] in
       let request = OpamSolver.request ~install:atoms ~criteria:`Fixup () in
       let names = OpamPackage.Name.Set.singleton name in
-      let requested = OpamPackage.packages_of_names st.installed names in
+      let requested = OpamPackage.packages_of_names st.packages names in
+      let reinstall = OpamPackage.packages_of_names st.installed names in
       let solution =
         OpamSolution.resolve st Reinstall
-          ~reinstall:requested
+          ~reinstall
           ~requested
           request
       in
