@@ -195,6 +195,10 @@ let custom_install cli =
              Empty))
         depends
     in
+(*
+    OpamConsole.error "old depends %s" (OpamFilter.string_of_filtered_formula depends);
+    OpamConsole.error "new depends %s" (OpamFilter.string_of_filtered_formula patched_depends);
+*)
     (* todo? Also remove installed conflicts? *)
     let pin_opam_file =
       pin_opam_file

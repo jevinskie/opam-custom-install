@@ -640,13 +640,6 @@ ERROR: should reinstall depopt?
   -> installed baz-depopt.1
   [ERROR] The compilation of baz.dev failed at "false local".
   
-  #=== ERROR while compiling baz.dev ============================================#
-  # context     2.2.0~alpha~dev | linux/x86_64 |  | pinned
-  # path        ~/ocamlpro/opam-custom-install/_build/.sandbox/7ec8d5c3ee7033cb2da4e71f5604ba7c/default/test/OPAMROOT/one/.opam-switch/build/baz.dev
-  # command     ~/ocamlpro/opam-custom-install/_build/.sandbox/7ec8d5c3ee7033cb2da4e71f5604ba7c/default/test/OPAMROOT/opam-init/hooks/sandbox.sh build false local
-  # exit-code   1
-  # env-file    ~/ocamlpro/opam-custom-install/_build/.sandbox/7ec8d5c3ee7033cb2da4e71f5604ba7c/default/test/OPAMROOT/log/baz-1520077-07745a.env
-  # output-file ~/ocamlpro/opam-custom-install/_build/.sandbox/7ec8d5c3ee7033cb2da4e71f5604ba7c/default/test/OPAMROOT/log/baz-1520077-07745a.out
   
   
   
@@ -661,10 +654,8 @@ ERROR: should reinstall depopt?
   +- 
   
   The former state can be restored with:
-      /home/rjbou/ocp_usr/bin/opam switch import "$TESTCASE_ROOT/OPAMROOT/one/.opam-switch/backup/state-20221129171534.export"
   Or you can retry to install your package selection with:
       /home/rjbou/ocp_usr/bin/opam install --restore
-  [31]
   $ rm c-installed
   $ opam unpin baz
   Ok, baz is no longer pinned locally (version dev)
