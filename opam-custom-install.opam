@@ -13,6 +13,6 @@ depends: [
 ]
 homepage: "https://github.com/OCamlPro/opam-custom-install"
 bug-reports: "https://github.com/OCamlPro/opam-custom-install/-/issues"
-dev-repo: "git+https://github.com/OCamlPro/opam-custom-install"
+dev-repo: "git+https://github.com/jevinskie/opam-custom-install"
 build: ["dune" "build" "-p" name "-j" jobs]
 flags: plugin
