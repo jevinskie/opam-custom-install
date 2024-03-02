@@ -9,7 +9,7 @@ tags: ["org:ocamlpro" "org:opam"]
 license: "LGPL-2.1-only WITH OCaml-LGPL-linking-exception"
 depends: [
   "dune" {>= "1.5"}
-  "opam-client" {>= "2.1.2" & < "2.2.0"}
+  "opam-client" {>= "2.1.2"}
 ]
 homepage: "https://github.com/OCamlPro/opam-custom-install"
 bug-reports: "https://github.com/OCamlPro/opam-custom-install/-/issues"
